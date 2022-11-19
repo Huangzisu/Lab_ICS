@@ -6,16 +6,49 @@
 ## Part A
 
 ### cache基本架构
+- 对于cache，使用二维数组来实现
 - line结构：最小的结构（不需要考虑line中内容）
   - valid：标记是否有效
   - tag：记录tag
-  - time：记录时间，以待后续使用LRU replacement policy来替换
+  - time：记录距离上一次使用的时间，以待后续使用LRU replacement policy来替换
 - set结构：由一个line结构数组
 - cache结构
   - sets：一个set结构数组
   - set_size：记录每个set存放多少个line
   - set_num：记录一共有多少个set
 
+### 所需函数的实现
+- *get_opt*：根据 cachelab.pdf 中提示，在本函数中调用了 *getopt* 函数来读取命令行中的选项，其中调用 *atoi* 函数来将读到的字符串转为int
+- *get_set_index*：该函数根据传入的地址返回相应的set_index
+- *get_tag*：该函数根据传入的地址返回相应的tag值
+- *test_miss*：该函数遍历相应的set检查是否出现miss
+- *test_full*：该函数遍历相应的set，检查该set是否装满
+- *update_time*：该函数用在每次有效操作之后，更新对应set中每个line的time，并将最新操作的line的time设置为0
+- *find_victim*：若出现需要替换时，用此函数寻找被替换的line，其中需要遍历set比较每个line的time，time最大的即为victim
+- *data_load*：该函数实现data load操作
+  - 首先判断是否miss，进而出现两种情况
+    - miss：累计miss次数并检查是否装满（发生eviction）
+      - 装满：发生eviction，累计eviction次数，寻找victim并修改状态
+      - 没装满：寻找空位并更新状态
+    - hit：累计hit次数
+  - 最后更新对应set中所有line的time
+- *data_store*：实现data store操作，在本实验中与data load产生一样效果，因此直接调用 *data_load* 
+- *data_modify*：实现data modify操作，即先data load在data store，先后调用已有函数即可
+- *init_cache*：初始化cache，即使用malloc分配空间并赋初值
+
+### main函数实现
+1. 首先调用 *get_opt* 读取命令行选项参数
+2. 根据相应参数初始化cache
+3. 打开相应文件
+4. 进入循环
+   1. 读取文件中的操作
+   2. 根据地址调用 *get_set_index* 与 *get_tag*，得到对应的set_index以及tag值
+   3. 进入switch判断语句
+      - 操作为L：调用 *data_load*
+      - 操作为S：调用 *data_store*
+      - 操作为M：调用 *data_modify*
+      - 操作为L：不做操作
+5. 调用 *printSummary*，程序结束
 
 
 ## Part B

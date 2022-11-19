@@ -28,24 +28,24 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
         int i, j, k;
         for(i = 0; i < 32; i+=8){
             for(j = 0; j < 32; j+=8){
-                    for(k = 0; k < 8; k++){
-                        int temp0 = A[i+k][j];
-                        int temp1 = A[i+k][j+1];
-                        int temp2 = A[i+k][j+2];
-                        int temp3 = A[i+k][j+3];
-                        int temp4 = A[i+k][j+4];
-                        int temp5 = A[i+k][j+5];
-                        int temp6 = A[i+k][j+6];
-                        int temp7 = A[i+k][j+7];
-                        B[j][i+k] = temp0;
-                        B[j+1][i+k] = temp1;
-                        B[j+2][i+k] = temp2;
-                        B[j+3][i+k] = temp3;
-                        B[j+4][i+k] = temp4;
-                        B[j+5][i+k] = temp5;
-                        B[j+6][i+k] = temp6;
-                        B[j+7][i+k] = temp7;
-                    }
+                for(k = 0; k < 8; k++){
+                    int temp0 = A[i+k][j];
+                    int temp1 = A[i+k][j+1];
+                    int temp2 = A[i+k][j+2];
+                    int temp3 = A[i+k][j+3];
+                    int temp4 = A[i+k][j+4];
+                    int temp5 = A[i+k][j+5];
+                    int temp6 = A[i+k][j+6];
+                    int temp7 = A[i+k][j+7];
+                    B[j][i+k] = temp0;
+                    B[j+1][i+k] = temp1;
+                    B[j+2][i+k] = temp2;
+                    B[j+3][i+k] = temp3;
+                    B[j+4][i+k] = temp4;
+                    B[j+5][i+k] = temp5;
+                    B[j+6][i+k] = temp6;
+                    B[j+7][i+k] = temp7;
+                }
             }
         }
     }else if(M == 64 && N == 64){
@@ -73,43 +73,126 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
                     B[j+2][i+k+4] = temp6;
                     B[j+3][i+k+4] = temp7;
                 }
+
+                //此时B中对角线上的两块小矩阵已经没有问题，接下来再处理另外两块小矩阵，即交换他们的元素
+                for(k = 0; k < 4; k++){
+                    //保存B中右上角小矩阵的一行（这是位置错误的，它实际上保存的是在A中右上角小矩阵的对应的一列，我们要将它保存后放到左下角小矩阵中的某一列正确位置中）
+                    temp0 = B[j+k][i+4];
+                    temp1 = B[j+k][i+5];
+                    temp2 = B[j+k][i+6];
+                    temp3 = B[j+k][i+7];
+                    //保存A中左下角小矩阵的一列（这是上面一个操作中位置错误的一行上应该保存的内容）
+                    temp4 = A[i+4][j+k];
+                    temp5 = A[i+5][j+k];
+                    temp6 = A[i+6][j+k];
+                    temp7 = A[i+7][j+k];
+                    //将提前保存好的A中左下角小矩阵的一列转移到上述位置错误的一行中（这是位置对应正确的）
+                    B[j+k][i+4] = temp4;
+                    B[j+k][i+5] = temp5;
+                    B[j+k][i+6] = temp6;
+                    B[j+k][i+7] = temp7;                    
+                    //将B中右上角小矩阵原本位置错误的一行的数据存入正确位置
+                    B[j+k+4][i] = temp0;
+                    B[j+k+4][i+1] = temp1;
+                    B[j+k+4][i+2] = temp2;
+                    B[j+k+4][i+3] = temp3;
+                }
+                //将剩下一个右下角小矩阵进行转置，此时不会出现未知错误
                 for(k = 4; k < 8; k++){
-                    temp0 = A[i+k][j];
-                    temp1 = A[i+k][j+1];
-                    temp2 = A[i+k][j+2];
-                    temp3 = A[i+k][j+3];
                     temp4 = A[i+k][j+4];
                     temp5 = A[i+k][j+5];
                     temp6 = A[i+k][j+6];
                     temp7 = A[i+k][j+7];
-                    //对于B中的两列写入
-                    B[j+4][i+k-4] = temp0;
-                    B[j+5][i+k-4] = temp1;
-                    B[j+6][i+k-4] = temp2;
-                    B[j+7][i+k-4] = temp3;
+                    //对于B中的列写入
                     B[j+4][i+k] = temp4;
                     B[j+5][i+k] = temp5;
                     B[j+6][i+k] = temp6;
                     B[j+7][i+k] = temp7;
                 }
-                //此时对角线上的两块小矩阵已经没有问题，接下来再处理另外两块小矩阵，即交换他们的元素
-                for(k = 0; k < 4; k++){
-                    temp0 = B[j+k+4][i+k];
-                    temp1 = B[j+k+4][i+k];
-                    temp2 = B[j+k+4][i+k];
-                    temp3 = B[j+k+4][i+3];
-                    B[j+k+4][i] = B[j+k][i+4];
-                    B[j+k+4][i] = B[j+k][i+5];
-                    B[j+k+4][i] = B[j+k][i+6];
-                    B[j+k+4][i] = B[j+k][i+7];
-                    B[j+k][i+4] = temp0;
-                    B[j+k][i+5] = temp1;
-                    B[j+k][i+6] = temp2;
-                    B[j+k][i+7] = temp3;
-                }
             }
         }
-    }
+    }else if(M == 61 && N == 67)
+	{
+		int i, j, v1, v2, v3, v4, v5, v6, v7, v8;
+		int n = N / 8 * 8;
+		int m = M / 8 * 8;
+		for (j = 0; j < m; j += 8)
+			for (i = 0; i < n; ++i)
+			{
+				v1 = A[i][j];
+				v2 = A[i][j+1];
+				v3 = A[i][j+2];
+				v4 = A[i][j+3];
+				v5 = A[i][j+4];
+				v6 = A[i][j+5];
+				v7 = A[i][j+6];
+				v8 = A[i][j+7];
+				
+				B[j][i] = v1;
+				B[j+1][i] = v2;
+				B[j+2][i] = v3;
+				B[j+3][i] = v4;
+				B[j+4][i] = v5;
+				B[j+5][i] = v6;
+				B[j+6][i] = v7;
+				B[j+7][i] = v8;
+			}
+		for (i = n; i < N; ++i)
+			for (j = m; j < M; ++j)
+			{
+				v1 = A[i][j];
+				B[j][i] = v1;
+			}
+		for (i = 0; i < N; ++i)
+			for (j = m; j < M; ++j)
+			{
+				v1 = A[i][j];
+				B[j][i] = v1;
+			}
+		for (i = n; i < N; ++i)
+			for (j = 0; j < M; ++j)
+			{
+				v1 = A[i][j];
+				B[j][i] = v1;
+			}
+	}
+    
+    // if(M == 61 && N == 67){
+    //     int i, j;
+        //先处理一个56x56矩阵
+        // for(i = 0; i < 56; i+=8){
+        //     for(j = 0; j < 56; j+=8){
+        //         for(k = 0; k < 8; k++){
+        //             int temp0 = A[i+k][j];
+        //             int temp1 = A[i+k][j+1];
+        //             int temp2 = A[i+k][j+2];
+        //             int temp3 = A[i+k][j+3];
+        //             int temp4 = A[i+k][j+4];
+        //             int temp5 = A[i+k][j+5];
+        //             int temp6 = A[i+k][j+6];
+        //             int temp7 = A[i+k][j+7];
+        //             B[j][i+k] = temp0;
+        //             B[j+1][i+k] = temp1;
+        //             B[j+2][i+k] = temp2;
+        //             B[j+3][i+k] = temp3;
+        //             B[j+4][i+k] = temp4;
+        //             B[j+5][i+k] = temp5;
+        //             B[j+6][i+k] = temp6;
+        //             B[j+7][i+k] = temp7;
+        //         }                
+        //     }
+        // }
+        // //处理剩下的部分
+        // for(i = 0; i < 61; i++){
+        //     for(j = 56; j < 67; j++){
+        //         B[j][i] = A[i][j];
+        //     }
+        // }
+        // for(i = 56; i < 61; i++){
+        //     for(j = 0; j < 56; j++){
+                
+        //     }
+        // }
     registerTransFunction(transpose_submit, transpose_submit_desc);
 }
 

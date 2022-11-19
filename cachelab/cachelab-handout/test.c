@@ -10,5 +10,5 @@ struct test
 
 
 int main(int argc, char* argv[]){
-    struct test* ok = (struct test*)malloc(3*sizeof(struct test));
+    printf("%d", 61 % 10);
 }

@@ -5,6 +5,18 @@
 
 ## Part A
 
+### cache基本架构
+- line结构：最小的结构（不需要考虑line中内容）
+  - valid：标记是否有效
+  - tag：记录tag
+  - time：记录时间，以待后续使用LRU replacement policy来替换
+- set结构：由一个line结构数组
+- cache结构
+  - sets：一个set结构数组
+  - set_size：记录每个set存放多少个line
+  - set_num：记录一共有多少个set
+
+
 
 ## Part B
 

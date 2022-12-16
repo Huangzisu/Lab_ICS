@@ -165,6 +165,56 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char* argv[MAXARGS];
+    int job_state;
+    pid_t pid;
+    sigset_t set, mask_all, prev;
+
+    //Parse the command line and determine the job state
+    if(parseline(cmdline, argv)){
+        job_state = BG;   
+    }else{
+        job_state = FG;
+    }
+    //Ignore empty lines
+    if(!argv[0]){
+        return;
+    }
+    //If the user didn't request a built-in command
+    if(!builtin_cmd(argv)){//If the user request a built-in command, then it is executed immediately here
+        //Block SIGCHLD to prevent race
+        sigemptyset(&set);
+        sigaddset(&set, SIGCHLD);
+        sigprocmask(SIG_BLOCK, &set, &prev);
+        //Fork a new process
+        if((pid = fork()) == 0){
+            //Unblock SIGCHLD
+            sigprocmask(SIG_SETMASK, &prev, NULL);
+            //Set pgid
+            setpgid(0, 0);
+            //Excute the new programme
+            if(execve(argv[0], argv, environ) < 0){
+                //Error handling
+                printf("%s: command not found\n", argv[0]);
+                exit(0);
+            }
+        }
+        //Mask all the signals
+        sigfillset(&mask_all);
+        sigprocmask(SIG_BLOCK, &mask_all, NULL);
+        //Add child process into jobs
+        addjob(jobs, pid, job_state, cmdline);
+        //Restore the blocked bits
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+        //Dealing with the child process according to its job state
+        if(job_state == FG){
+            //If it is a foreground process, then wait until it is finished
+            waitfg(pid);
+        }else{
+            //Print the info
+            printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
+        }
+    }
     return;
 }
 
@@ -231,6 +281,16 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    //Recognize and interpret the command, then execute accordingly
+    if(!strcmp(argv[0], "jobs")){
+        listjobs(jobs);
+        return 1;
+    }else if(!strcmp(argv[0], "bg") || !strcmp(argv[0], "fg")){
+        do_bgfg(argv);
+        return 1;
+    }else if(!strcmp(argv[0], "quit")){
+        exit(0);
+    }
     return 0;     /* not a builtin command */
 }
 
@@ -238,7 +298,53 @@ int builtin_cmd(char **argv)
  * do_bgfg - Execute the builtin bg and fg commands
  */
 void do_bgfg(char **argv) 
-{
+{   
+    int id;
+    struct job_t *job;
+    //If no PID or jobid argument inputted
+    if(!argv[1]){
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
+    }
+    //If the user inputs jobid
+    if(argv[1][0] == '%'){
+        id = atoi(&argv[1][1]);
+        //Invalid input
+        if(id <= 0){
+            printf("%s: argument must be a PID or %%jobid\n",argv[0]);
+            return;
+        }
+        job = getjobjid(jobs, id);
+        //No corresponding job
+        if(!job){
+            printf("%%%d: No such job\n", id);
+            return;
+        }
+    }else{//If the user inputs pid
+        id = atoi(&argv[1][0]);
+        //Invalid input
+        if(id <= 0){
+            printf("%s: argument must be a PID or %%jobid\n",argv[0]);
+            return;
+        }
+        job = getjobpid(jobs, id);
+        //No corresponding job
+        if(!job){
+            printf("(%d): No such process\n", id);
+            return;
+        }
+    }
+    //If the command is bg
+    if(!strcmp(argv[0], "bg")){
+        job->state = BG;
+        kill(-job->pid, SIGCONT);//Using negative int to send signal to process group
+        printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
+    }else{//If the command is fg
+        job->state = FG;
+        kill(-job->pid, SIGCONT);//Using negative int to send signal to process group
+        //Wait until the job is finished
+        waitfg(job->pid);
+    }
     return;
 }
 
@@ -247,6 +353,12 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    struct job_t *job;
+    job = getjobpid(jobs, pid);
+    //If the process is in foreground, then sleep
+    while(job->state == FG){
+        sleep(1);
+    }
     return;
 }
 
@@ -263,6 +375,33 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    int error_save = errno;//Save errno
+    pid_t pid;
+    int status;
+    sigset_t mask, prev;
+    sigfillset(&mask);            
+    //Reap all the child process
+    while((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0){
+        //Block all signals to avoid races
+        sigprocmask(SIG_BLOCK, &mask, &prev);        
+        //Recognize the three status and do the corresponding action
+        if(WIFEXITED(status)){//If the process is normally terminated by exit or return
+            deletejob(jobs, pid);
+        }else if(WIFSIGNALED(status)){//If the process is terminated by a signal which hasn't been caught
+            struct job_t *job = getjobpid(jobs, pid);
+            printf("Job [%d] (%d) terminated by signal %d\n", job->jid, pid, WTERMSIG(status)); //Print the sigal            
+            deletejob(jobs, pid);
+        }else if(WIFSTOPPED(status)){//If the process is stopped
+            struct job_t *job = getjobpid(jobs, pid);
+            job->state = ST;//Change the job state
+            printf("Job [%d] (%d) stopped by signal %d\n", job->jid, pid, WSTOPSIG(status));//Print the signal
+        }    
+        //Restore the blocking bits
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+    }
+
+    //Retore the errno
+    errno = error_save;
     return;
 }
 
@@ -273,6 +412,14 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    int error_save = errno;//Save the errno
+    pid_t fg_pid = fgpid(jobs);
+    //Send SIGINT signal to all process int the foreground process group
+    if(fg_pid > 0){
+        kill(-fg_pid, sig);
+    }
+    //Restore the errno
+    errno = error_save;
     return;
 }
 
@@ -283,6 +430,14 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    int error_save = errno;//Save the errno
+    pid_t fg_pid = fgpid(jobs);
+    //Send SIGINT signal to all process int the foreground process group
+    if(fg_pid != 0){
+        kill(-fg_pid, sig);
+    }
+    //Restore the errno
+    errno = error_save;
     return;
 }
 
